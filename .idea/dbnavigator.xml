@@ -30,52 +30,102 @@
   </component>
   <component name="DBNavigator.Project.DatabaseConsoleManager">
     <connection id="c5fc479b-5981-4163-9bbd-67c49e95323a">
-      <console name="Connection" type="STANDARD" schema="public" session="Main"><![CDATA[-- Таблица продуктов
+      <console name="Connection" type="STANDARD" schema="public" session="Main"><![CDATA[-- =============================================
+-- ЗАПРОСЫ НА ЧТЕНИЕ (SELECT)
+-- =============================================
 
-CREATE TABLE IF NOT EXISTS product (
-    id SERIAL PRIMARY KEY,
-    description TEXT NOT NULL,
-    price NUMERIC(10, 2) NOT NULL CHECK(price >= 0),
-    quantity INT NOT NULL CHECK(quantity >= 0),
-    category VARCHAR(50) NOT NULL
-);
-COMMENT ON COLUMN product.price IS 'Цена продукта';
-COMMENT ON COLUMN product.quantity IS 'Количество на складе';
+-- 1. Список всех заказов за последние 7 дней с именем покупателя и описанием товара
+SELECT
+    o.id AS order_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    p.description AS product_name,
+    o.quantity,
+    o.date_order,
+    os.name AS status
+FROM orders o
+JOIN customer c ON o.customer_id = c.id
+JOIN product p ON o.product_id = p.id
+JOIN order_status os ON o.status_id = os.id
+WHERE o.date_order >= CURRENT_DATE - INTERVAL '7 days'
+ORDER BY o.date_order DESC;
 
--- Таблица покупателей
-CREATE TABLE IF NOT EXISTS customer (
-    id SERIAL PRIMARY KEY,
-    first_name VARCHAR(50) NOT NULL,
-    last_name VARCHAR(50) NOT NULL,
-    phone VARCHAR(15) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL
-);
-COMMENT ON COLUMN customer.first_name IS 'Имя клиента';
-COMMENT ON COLUMN customer.last_name IS 'Фамилия клиента';
+-- 2. Топ-3 самых популярных товара (по общему количеству заказанных единиц)
+SELECT
+    p.id,
+    p.description,
+    SUM(o.quantity) AS total_ordered
+FROM orders o
+JOIN product p ON o.product_id = p.id
+GROUP BY p.id, p.description
+ORDER BY total_ordered DESC
+LIMIT 3;
 
--- Справочная таблица статусов заказов
-CREATE TABLE IF NOT EXISTS order_status (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(50) NOT NULL UNIQUE
-);
-COMMENT ON COLUMN order_status.name IS 'Название статуса заказа';
+-- 3. Клиенты с самой высокой общей суммой заказов
+SELECT
+    c.id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    SUM(o.quantity * p.price) AS total_spent
+FROM orders o
+JOIN customer c ON o.customer_id = c.id
+JOIN product p ON o.product_id = p.id
+WHERE os.name IN ('Оплачен', 'Доставлен') -- Учитываем только завершенные заказы
+GROUP BY c.id, customer_name
+ORDER BY total_spent DESC;
 
--- Основная таблица заказов
-CREATE TABLE IF NOT EXISTS orders (
-    id SERIAL PRIMARY KEY,
-    product_id INT REFERENCES product(id),
-    customer_id INT REFERENCES customer(id),
-    date_order TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    quantity INT NOT NULL CHECK(quantity > 0),
-    status_id INT REFERENCES order_status(id)
-);
-COMMENT ON COLUMN orders.date_order IS 'Дата размещения заказа';
-COMMENT ON COLUMN orders.status_id IS 'Идентификатор текущего статуса заказа';
+-- 4. Ежемесячная статистика продаж по категориям товаров
+SELECT
+    DATE_TRUNC('month', o.date_order) AS month,
+    p.category,
+    COUNT(o.id) AS orders_count,
+    SUM(o.quantity) AS total_quantity,
+    SUM(o.quantity * p.price) AS total_revenue
+FROM orders o
+JOIN product p ON o.product_id = p.id
+GROUP BY month, p.category
+ORDER BY month DESC, total_revenue DESC;
 
--- Индексация внешних ключей и полей даты заказа
-CREATE INDEX IF NOT EXISTS idx_product_fk ON orders(product_id);
-CREATE INDEX IF NOT EXISTS idx_customer_fk ON orders(customer_id);
-CREATE INDEX IF NOT EXISTS idx_date_order ON orders(date_order);]]></console>
+-- 5. Товары, которые нуждаются в пополнении запасов (количество на складе меньше 10)
+SELECT
+    id,
+    description,
+    quantity,
+    category
+FROM product
+WHERE quantity < 10
+ORDER BY quantity ASC;
+
+-- =============================================
+-- ЗАПРОСЫ НА ИЗМЕНЕНИЕ (UPDATE)
+-- =============================================
+
+-- 6. Обновление количества товара на складе после заказа
+UPDATE product
+SET quantity = quantity - 5
+WHERE id = 1;
+
+-- 7. Повышение цены на 10% для товаров категории "Электроника"
+UPDATE product
+SET price = price * 1.10
+WHERE category = 'Электроника';
+
+-- 8. Обновление статуса заказа на "Доставлен" для заказов старше 3 дней
+UPDATE orders
+SET status_id = (SELECT id FROM order_status WHERE name = 'Доставлен')
+WHERE status_id = (SELECT id FROM order_status WHERE name = 'Отгружен')
+AND date_order < CURRENT_DATE - INTERVAL '3 days';
+
+-- =============================================
+-- ЗАПРОСЫ НА УДАЛЕНИЕ (DELETE)
+-- =============================================
+
+-- 9. Удаление клиентов без заказов
+DELETE FROM customer
+WHERE id NOT IN (SELECT DISTINCT customer_id FROM orders);
+
+-- 10. Удаление устаревших отмененных заказов (старше 1 года)
+DELETE FROM orders
+WHERE status_id = (SELECT id FROM order_status WHERE name = 'Отменен')
+AND date_order < CURRENT_DATE - INTERVAL '1 year';]]></console>
     </connection>
   </component>
   <component name="DBNavigator.Project.DatabaseEditorStateManager">
@@ -83,29 +133,33 @@ CREATE INDEX IF NOT EXISTS idx_date_order ON orders(date_order);]]></console>
   </component>
   <component name="DBNavigator.Project.DatabaseFileManager">
     <open-files>
+      <object connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" object-ref="schemas/public/tables/customer" />
+      <object connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" object-ref="schemas/public/tables/order_status" />
       <object connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" object-ref="consoles/Connection" />
+      <object connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" object-ref="schemas/public/tables/product" />
+      <object connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" object-ref="schemas/public/tables/orders" />
     </open-files>
   </component>
   <component name="DBNavigator.Project.DatabaseSessionManager">
     <connection id="c5fc479b-5981-4163-9bbd-67c49e95323a" />
   </component>
   <component name="DBNavigator.Project.DatasetFilterManager">
-    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.order_status" active-filter-id="a17a5063-a2fa-4919-8ac8-31728f00a0ca">
+    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.order_status" active-filter-id="EMPTY_FILTER">
       <filter id="a17a5063-a2fa-4919-8ac8-31728f00a0ca" name="Filter" temporary="false" custom-name="false" type="basic" join-type="AND">
         <condition column="id" operator="=" value="" active="true" />
       </filter>
     </filter-actions>
-    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.customer" active-filter-id="7ac47ceb-1cd0-4051-ae9f-8c6c8ff58a6f">
+    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.customer" active-filter-id="EMPTY_FILTER">
       <filter id="7ac47ceb-1cd0-4051-ae9f-8c6c8ff58a6f" name="Filter" temporary="false" custom-name="false" type="basic" join-type="AND">
         <condition column="id" operator="=" value="" active="true" />
       </filter>
     </filter-actions>
-    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.orders" active-filter-id="1e4e2a99-9e04-4ade-9e3f-18b7c5d0dca7">
+    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.orders" active-filter-id="EMPTY_FILTER">
       <filter id="1e4e2a99-9e04-4ade-9e3f-18b7c5d0dca7" name="Filter" temporary="false" custom-name="false" type="basic" join-type="AND">
         <condition column="id" operator="=" value="" active="true" />
       </filter>
     </filter-actions>
-    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.product" active-filter-id="87ddd9d0-e05d-436e-83e0-49ed21f77a0a">
+    <filter-actions connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" dataset="public.product" active-filter-id="EMPTY_FILTER">
       <filter id="87ddd9d0-e05d-436e-83e0-49ed21f77a0a" name="Filter" temporary="false" custom-name="false" type="basic" join-type="AND">
         <condition column="id" operator="=" value="" active="true" />
       </filter>
@@ -113,6 +167,9 @@ CREATE INDEX IF NOT EXISTS idx_date_order ON orders(date_order);]]></console>
   </component>
   <component name="DBNavigator.Project.ExecutionManager">
     <retain-sticky-names value="false" />
+  </component>
+  <component name="DBNavigator.Project.FileConnectionMappingManager">
+    <mapping file-url="file://$PROJECT_DIR$/src/main/resources/db/migration/V1__Create_tables.sql" connection-id="c5fc479b-5981-4163-9bbd-67c49e95323a" session-id="MAIN" current-schema="public" />
   </component>
   <component name="DBNavigator.Project.MethodExecutionManager">
     <method-browser />
